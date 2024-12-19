@@ -1,0 +1,393 @@
+---
+title: "Rethinking the Top Layer Bat Clicks"
+author: "Mauricio Rubio Jr."
+  
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+```{r, echo=FALSE}
+load("~/Documents/Git/ml-data/BatsProj.RData")
+```
+[Git Repository](https://github.com/MRubio52/ml-data.git)
+
+This project started out differently, my main objective was to establish a better feeder system for the tools and skills clicks we have in the top half of our report system. In the tools portion of our reports we are asked to measure:
+
+Hitting for Average
+
+Raw Power
+
+Game Power
+
+and in the skills portion we are asked to gauge:
+
+Contact
+
+Approach
+
+Hard Hit
+
+We can draw parallels from those skill clicks to the three slash line stats (loosely):
+
+[AVG](https://www.mlb.com/glossary/standard-stats/batting-average)
+
+[OBP](https://www.mlb.com/glossary/standard-stats/on-base-percentage)
+
+[SLG](https://www.mlb.com/glossary/standard-stats/slugging-percentage)
+
+Another way to interpret this is to think about the questions in this manner:
+
+How much contact will he make?
+
+How much discipline will he have in the batter’s box?
+
+How hard will he hit the ball?
+
+The three main proxies you can use for the above questions, from a statistical point of view, are the following:
+
+[Contact%](https://library.fangraphs.com/offense/plate-discipline/)
+
+[BB% and Zone Contact Swing Decision stats (Z-Swing, O-Swing)](https://library.fangraphs.com/offense/plate-discipline/)
+
+[Exit Velocity numbers](https://www.mlb.com/glossary/statcast/exit-velocity)
+
+This is a closer approximation of what we are trying to do. It’s not so much about predicting output stats like the traditional slash line, but more about trying to get in the ballpark of what skills and tools a player will bring to the table. 
+
+With that in mind I attempted to establish any links between the Tools grades and the Skills grades. Let's take a quick look at the shape of Batting Average in Major League Baseball from 2022-2024:
+
+
+```{r, echo=FALSE}
+hist(FG2022_2024Bats$AVG, breaks=20)
+```
+
+
+Under the hood the numbers on Batting Avereage look like this:
+
+```{r, echo=FALSE}
+summary(FG2022_2024Bats$AVG)
+```
+
+Lastly we can define the variance within Batting Average this way:
+
+```{r}
+var(FG2022_2024Bats$AVG)
+```
+
+It's a tight data array, but it falls in line with the other triple-slash stats:
+
+```{r}
+summary(FG2022_2024Bats$OBP)
+var(FG2022_2024Bats$OBP)
+summary(FG2022_2024Bats$SLG)
+var(FG2022_2024Bats$SLG)
+```
+
+Now that we understand the basic shape of the data we can move on to what skills potentially feed into batting average to help improve our clicks. I came to a dead halt almost right away. The reason? The R2 numbers between AVG and Contact Rates (the skill click that is supposed to help inform Batting Average) at the ML level since 2022 max out at .34 (give or take) which is a weak correlation:
+
+```{r}
+cor(FG2022_2024Bats$`Contact%`, FG2022_2024Bats$AVG, use = "everything",
+    method = c("pearson", "kendall", "spearman"))
+```
+
+Here is a visual of what the shape of the data looks like: 
+
+``` {r, echo=FALSE}
+library(ggplot2)
+ggplot(FG2022_2024Bats, aes(x=AVG, y=`Contact%`)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", fill="grey", se=TRUE) +
+   xlab('Batting Average') +
+  ylab("Contact Percentage") +
+  ggtitle("Contact Percentage and Batting Average")
+```
+
+There is some light upward bend towards the extremes of the contact rate spectrum, and true outliers have an overwhelmingly positive correlation between contact rates and batting average. The correlation begins to fall apart almost immediately outside of the Elite Contact rate zone, however. 
+
+Here is the average, standard deviation and variance of contact rate league wide since 2022:
+
+```{r}
+mean(FG2022_2024Bats$`Contact%`)
+sd(FG2022_2024Bats$`Contact%`)
+var(FG2022_2024Bats$`Contact%`)
+```
+
+Our skill grades use a scale from ORG value to MLB Elite. We can use the SD number to generate a loose scale by having the MLB click, which is average, capture the most data. (mean of contact% +/- SD of contact% divided by half). We can roughly outline the scale to look like this:
+
+
+```{r table-simple, echo=FALSE, message=FALSE, warnings=FALSE, results='asis'}
+require(pander)
+panderOptions('table.split.table', Inf)
+set.caption("Contact Clicks")
+my.data <- "
+  Click         | Low           | High
+  Elite      | 87% | 100% 
+  MLB+      | 80%      |   86% 
+  MLB AVG | 73%      |    79%
+  MLB BA | 66%      |    72%
+  4A/RSRV | 59%      |    65%
+  ORG | 0%      |    58%"
+df <- read.delim(textConnection(my.data),header=FALSE,sep="|",strip.white=TRUE,stringsAsFactors=FALSE)
+names(df) <- unname(as.list(df[1,])) # put headers on
+df <- df[-1,] # remove first row
+row.names(df)<-NULL
+pander(df, style = 'rmarkdown')
+```
+
+
+Looking back on our graph we can see that basically as soon as you fall out of the Elite tier the predictive nature of Contact Percentage, as it pertains to Batting Average, takes a severe hit. You’re just as likely to hit .150, a poor Average, as you are .340, an excellent average, if your contact rate is better than most Major Leaguers. 
+
+Extending this out I wanted to see if perhaps Z-Contact% told a different story:
+
+```{r}
+ cor(FG2022_2024Bats$`Z-Contact%`, FG2022_2024Bats$AVG, use = "everything",
+      method = c("pearson", "kendall", "spearman"))
+```
+```{r, echo=FALSE}
+library(ggplot2)
+ggplot(FG2022_2024Bats, aes(x=AVG, y=`Z-Contact%`)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", fill="grey", se=TRUE) +
+  xlab('Batting Average') +
+  ylab("Zone Contact") +
+  ggtitle("Zone Contact and Batting Average")
+```
+
+There is some light correlation between making more zone contact and hitting for average but it’s not an overwhelming correlation, you can see there is a lot of variance throughout the plot. We’re running into the same issue that we did with pure Contact%.
+
+There is the possibility that contact rates, while not a perfect indicator of who will hit for average, are much more predictive than any other stat or potential click we could install. I explored other avenues. 
+
+This is what the correlation looks like for both EV measures and AVG:
+
+Average EV (or “game power”)
+
+```{r}
+ cor(FG2022_2024Bats$EV, FG2022_2024Bats$AVG, use = "everything",
+      method = c("pearson", "kendall", "spearman"))
+```
+```{r, echo=FALSE}
+library(ggplot2)
+ggplot(FG2022_2024Bats, aes(x=AVG, y=EV)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", fill="grey", se=TRUE) +
+  xlab('Batting Average') +
+  ylab("Average Exit Velocity") +
+  ggtitle("Average Exit Velocity and Batting Average")
+```
+
+And here is Max EV, or "Raw Power":
+
+```{r}
+ cor(FG2022_2024Bats$maxEV, FG2022_2024Bats$AVG, use = "everything",
+      method = c("pearson", "kendall", "spearman"))
+```
+```{r, echo=FALSE}
+library(ggplot2)
+ggplot(FG2022_2024Bats, aes(x=AVG, y=maxEV)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", fill="grey", se=TRUE) +
+  xlab('Batting Average') +
+  ylab("Max Exit Velocity") +
+  ggtitle("Max Exit Velocity and Batting Average")
+```
+
+Raw contact is more predictive than the exit velocity numbers are, but the difference between them was much smaller than anticipated. Furthermore the difference between Zone Contact and the power numbers are within the ballpark. 
+
+There are different ways to interpret these outputs. The overarching one is that predicting Average is a fool’s errand since the skill we are attempting to correlate to AVG isn’t even that predictive of AVG. Another way to interpret the data is to ask what it is exactly that we’re trying to measure in the first place. 
+
+Every single click in the report, from the Hit Tool all the way to the basic Athleticism grade is geared towards measuring future production against other major leaguers. The Scale is there mostly to provide context in relation to other big-league players. It’s more useful the higher up the food-chain you are, and inversely loses accuracy as you crawl down levels. A HS player’s batter report will have significantly less predictive value than a Major Leaguer’s batter report, which is not ground-breaking but important to keep in mind for the following: 
+
+Considering that we amateur scouts and our cousins in the international department exist further down the spectrum when it comes to predictive “accuracy” of our clicks, does it make sense to reimagine a few of those clicks?
+
+Let’s reconsider the relationship between EV and Batting Average and add a layer in. I’ll be using [wRC+](https://library.fangraphs.com/offense/wrc/) as the reference point. It measures how productive you are offensively using a myriad of statistical inputs:
+
+>*"wRC+" measures how a player’s wRC compares with league average after controlling for park effects.  League average for position players is 100, and every point above 100 is a percentage point above league average. For example, a 125 wRC+ means a player created 25% more runs than a league average hitter would have in the same number of plate appearances. Similarly, every point below 100 is a percentage point below league average, so a 80 wRC+ means a player created 20% fewer runs than league average.*
+
+I’ll keep using EV for the first example since it is a proxy for one of our skill clicks, Hard Hit. 
+
+ If we measure the correlation between average EV and wRC+ we get the following:
+
+```{r}
+cor(FG2022_2024Bats$`wRC+`, FG2022_2024Bats$EV, use = "everything",
+     method = c("pearson", "kendall", "spearman"))
+```
+
+```{r, echo=FALSE}
+library(ggplot2)
+ggplot(FG2022_2024Bats, aes(x=`wRC+`, y=EV)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", fill="grey", se=TRUE) +
+  xlab('wRC+') +
+  ylab("Average Exit Velocity") +
+  ggtitle("Average Exit Velocity and wRC+")
+```
+
+A much stronger relationship is formed between a skill and a measure of overall production. For good measure here is the relationship between wRC+ and Max EV:
+
+```{r}
+ cor(FG2022_2024Bats$`wRC+`, FG2022_2024Bats$maxEV, use = "everything",
+     method = c("pearson", "kendall", "spearman"))
+```
+
+```{r, echo=FALSE}
+library(ggplot2)
+ggplot(FG2022_2024Bats, aes(x=`wRC+`, y=maxEV)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", fill="grey", se=TRUE) +
+  xlab('wRC+') +
+  ylab("Max Exit Velocity") +
+  ggtitle("Max Exit Velocity and wRC+")
+```
+
+We can see that Average Exit Velocity is more predictive of offensive production than Contact Percentage is of Batting Average. And while Max Exit Velocity is not quite as strong as Average EV it is still stronger than anything related to Batting Average. The synergy between input and output is tighter here. 
+
+Let’s retrace our steps and see if there is any correlation to contact ability and offensive value:
+
+```{r}
+cor(FG2022_2024Bats$`Contact%`, FG2022_2024Bats$`wRC+`, use = "everything",
+          method = c("pearson", "kendall", "spearman"))
+```
+
+```{r, echo=FALSE}
+library(ggplot2)
+ggplot(FG2022_2024Bats, aes(x=`wRC+`, y=`Contact%`)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", fill="grey", se=TRUE) +
+  xlab('wRC+') +
+  ylab("Contact Percentage") +
+  ggtitle("Contact Percentage and wRC+")
+```
+It would appear not. Ability to make contact doesn’t seem to really scale with anything that measures value, even offensively. 
+
+[fWAR](https://library.fangraphs.com/war/differences-fwar-rwar/) measures your contributions on the field over a replacement player. The quick and dirty is that anyone who manages to post an fWAR over 2 is typically considered an every-day player or close to it. The higher it goes the more value you provided. 
+
+>*"The general framework for each method is essentially the same. You’re looking at hitting value, base running value, fielding value, positional adjustments, replacement level, and a few other small corrections for position players."*
+- FanGraphs
+
+```{r, echo=FALSE}
+library(ggplot2)
+ggplot(FG2022_2024Bats, aes(x=`WAR`, y=`Contact%`)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", fill="grey", se=TRUE) +
+  xlab('WAR') +
+  ylab("Contact Percentage") +
+  ggtitle("Contact Percentage and WAR")
+```
+
+I won’t bother with the correlation numbers on contact and fWAR, the graph says a lot. Keeping in mind that a contact rate of 72% is considered below Major League average you can see that plenty of players manage to provide plenty of value while not making elite levels of contact. The two top player seasons from the past three years actually had contact rates hovering the below average mark. Now, fWAR also measures defensive value and positional value, but considering the relationship between contact and wRC+, a purely offensive metric, we can say that the relationship between Contact% and player value is watery. 
+
+The course of action shouldn’t be to turn this into a raw power contest, however. What good is top-of-the-scale Raw Power if you can never get to it in-game? Is there a better way to ask the question: Who’s tools are going to play?
+
+To answer this I went in search of what soft factor can be a proxy for “hitability”.
+
+We eliminated raw contact rates. Zone swing was not at all useful and nowhere near predictive enough to be reliable:
+
+```{r}
+cor(FG2022_2024Bats$`wRC+`, FG2022_2024Bats$`Z-Swing%`, use = "everything",
+     method = c("pearson", "kendall", "spearman"))
+```
+
+Which leads me to [Barrel Rate](https://tht.fangraphs.com/barrels-normative-analysis-and-the-beauties-of-statcast/):
+
+>*"MLB’s newest Statcast treasure is called Barrels. It measures a player’s ability to put the barrel of the bat on the ball and generate good contact."*
+-FanGraphs
+```{r}
+cor(FG2022_2024Bats$`wRC+`, FG2022_2024Bats$`Barrel%`, use = "everything",
+     method = c("pearson", "kendall", "spearman"))
+```
+
+```{r, echo=FALSE}
+library(ggplot2)
+ggplot(FG2022_2024Bats, aes(x=`wRC+`, y=`Barrel%`)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", fill="grey", se=TRUE) +
+  xlab('wRC+') +
+  ylab("Barrel Rate") +
+  ggtitle("Find the Barrel")
+```
+
+Strong correlation numbers and a pretty upward trend in the graph. Perfect. Barrel rate is a combo stat that takes a player’s inputs, like strength (EV), ability to get on-plane (launch angle range) and timing. Basically if you catch the barrel you did something really well. 
+
+Hitting is essentially finding the barrel. It’s not batting average but a good one can be a byproduct of it. It’s not raw contact rate and it’s not taking a walk. It’s not just strength, although as we’ve discovered in this paper you do need to be strong enough to hit. Hitting is a combination of those things and the goal of hitting is to find the barrel. It’s embarrassing that it took me this many tries to figure it out. The more you find the barrel, the more successful you will be. 
+
+So, what if we followed this strand of thinking to it’s logical conclusion? Instead of hitting for average and predicting homeruns, what if we instead asked what we think their overall bat value will be? There are a few ways to execute this and I will keep it to my top option: 
+
+Bat Value
+
+* Axe hitting for average and game power
+* Replace Raw Power with Strength Projection
+* Implementing this click with a scale that is similar 
+* Use confidence bars to measure conviction
+
+```{r table, echo=FALSE, message=FALSE, warnings=FALSE, results='asis'}
+require(pander)
+panderOptions('table.split.table', Inf)
+set.caption("New Scale")
+new.scale <- "
+  Select       | Explainer          
+  Elite      |   Old school 14-16 bats (ie 80 80 on hit and pwr)
+  MLB+      | 12-14 Bats   
+  MLB AVG | 10-12 Bats    
+  MLB BA | 8-10 Bats      
+  4A/Rsrv | 5-8 Bats
+  ORG | Everything Else"
+df <- read.delim(textConnection(new.scale),header=FALSE,sep="|",strip.white=TRUE,stringsAsFactors=FALSE)
+names(df) <- unname(as.list(df[1,])) # put headers on
+df <- df[-1,] # remove first row
+row.names(df)<-NULL
+pander(df, style = 'rmarkdown')
+```
+
+
+There has been some hesitancy in the past to click a 70 or an 80 in a grade for a variety of reasons, this has a chance to take some of the fear factor out by re-establishing a top baseline while asking a better question. 
+
+*-Despite it’s lack of accuracy I do believe that the Contact Skill click should still exist. Scouts will still be able to differentiate between power over hit or three true outcome types with the skills clicks, which have value when it comes to player separation and conviction checks in report writing.*
+
+This can scale with a measure like wRC+:
+
+```{r}
+mean(FG2022_2024Bats$`wRC+`)
+sd(FG2022_2024Bats$`wRC+`)
+```
+
+As you can see the standard deviation will get wonky when it comes to below average values, so some smoothing of the scale will be required. It can look like:
+
+```{r sdtable, echo=FALSE, message=FALSE, warnings=FALSE, results='asis'}
+require(pander)
+panderOptions('table.split.table', Inf)
+set.caption("Standard Deviation of wRC+")
+sd.wrc <- "
+  Select       | Low | High        
+  Elite      | 137.5  | INF
+  MLB+      | 108.1 | 137.4   
+  MLB AVG | 90 | 108    
+  MLB BA | 80 | 89      
+  4A/Rsrv | 70 | 79
+  ORG | 0 | 69"
+df <- read.delim(textConnection(sd.wrc),header=FALSE,sep="|",strip.white=TRUE,stringsAsFactors=FALSE)
+names(df) <- unname(as.list(df[1,])) # put headers on
+df <- df[-1,] # remove first row
+row.names(df)<-NULL
+pander(df, style = 'rmarkdown')
+```
+
+I believe in moving away from the 20-80 scale for hitting tools but I do advocate for this style of grading which keeps ML role grades in place. It will do the job of separating the top end while creating better slices at the bottom end while also keeping intact the idea that, while it is rare, you can have value while generating BA bat value:
+
+
+```{r, echo=FALSE, warning=FALSE}
+library(ggplot2)
+ggplot(FG2022_2024Bats, aes(x=`wRC+`, y=`WAR`)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", fill="grey", se=TRUE) +
+  xlab('wRC+') +
+  ylab("WAR") +
+  ggtitle("The New Scale")
+```
+
+A player’s upside is certainly limited on our future roles clicks but there are a few players who hover over 2 wins with underwater wRC+ numbers. 
+
+# Conclusion
+
+Batting Average has taken a battering over the years from third party analysts and generally it’s not the gold standard when it comes to player evaluation. There are plenty of examples but my favorite one of recent vintage is Luis Arraez. He won the batting title (best average in the league) with a .314 Average and finished with an fWAR under 2 (1.1 to be exact). Furthermore his wRC+ was a pedestrian 109, which using our quick scale up top barely clips the MLB + tier for bat value. 
+
+If Average cannot inform us at the ML level then we need to come up with something different when it comes to assigning player value all the way down the ladder. It’s clear that predicting batting average is at best tricky and at worst full of flaws and noise. Therefore it is my recommendation that we shift the focus from “who will hit .270” and hone in on “who has the tools and traits that will allow their skillset to play?” I believe that Bat Value, or some version of that click, has a chance to do that by asking a better question: how much value is this player going to provide with the stick?
